@@ -76,6 +76,44 @@ jobs:
             --xcargs '-test-timeouts-enabled YES -maximum-test-execution-time-allowance 300 -default-test-execution-time-allowance 60' \
             || formatFailures
 
+      # New: build an unsigned .ipa from the built app and upload it as an artifact.
+      # This produces an unsigned IPA by building without code signing and packaging the .app into a Payload zip.
+      - name: Build unsigned IPA
+        if: success()
+        run: |
+          set -euo pipefail
+          echo "Building unsigned app (unsigned .ipa will be created)..."
+
+          # Clean & build without code signing into a local build directory.
+          xcodebuild clean -scheme Signal -configuration Release
+          xcodebuild -scheme Signal -configuration Release -sdk iphoneos BUILD_DIR="$PWD/build" SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+          # Locate the built .app
+          APP_PATH=$(find "$PWD/build" -type d -name "Signal.app" | head -n1 || true)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: built app not found in build directory."
+            echo "Listing build directory:"
+            ls -la "$PWD/build" || true
+            exit 1
+          fi
+
+          echo "Found app at: $APP_PATH"
+          # Package the .app into an unsigned .ipa by zipping a Payload folder
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          /usr/bin/zip -r Signal-unsigned.ipa Payload > /dev/null
+          rm -rf Payload
+          ls -lh Signal-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: Signal-unsigned.ipa
+
       - name: Upload build logs
         uses: actions/upload-artifact@v4
         if: failure()
